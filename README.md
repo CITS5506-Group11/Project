@@ -1,2 +1,1 @@
-# Project
-Integrated Smart Home Monitoring and Security System
+# Integrated Smart Home Monitoring and Security System
