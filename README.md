@@ -1,5 +1,18 @@
 # Integrated Smart Home Monitoring and Security System
 
+## CITS5506 Group11 members
+
+| UWA ID  | Name | Github Username |
+|---------|------|-----------------|
+|24056082 |Tong Lan|tonglam|
+|21978612 |Lucy Chen|lucychen0305|
+|23846485 |Kazi Imran|imran072|
+|23807749|Luna Zhang|LunaZxxy|
+|23958495|Raul Poma Astete|23958495|
+|24090236 |Konstantin Tagintsev|ktagintsev|
+
+## Project Overview
+
 The system aims to enhance home security and environmental monitoring by integrating a variety of sensors and communication modules. The system is controlled via a Telegram bot, offering real-time updates and remote management. The system continuously monitors environmental factors like temperature, humidity, and carbon dioxide levels while also ensuring security through real-time surveillance.
 
 ## Functional Requirements
