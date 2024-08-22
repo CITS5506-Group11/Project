@@ -4,11 +4,6 @@
 
 | UWA ID  | Name | Github Username |
 |---------|------|-----------------|
-|24056082 |Tong Lan|tonglam|
-|21978612 |Lucy Chen|lucychen0305|
-|23846485 |Kazi Imran|imran072|
-|23807749|Luna Zhang|LunaZxxy|
-|23958495|Raul Poma Astete|23958495|
 |24090236 |Konstantin Tagintsev|ktagintsev|
 
 ## Project Overview
