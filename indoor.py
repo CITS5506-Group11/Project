@@ -1,35 +1,39 @@
-import time, smbus2, bme280, requests, sqlite3, threading, board, busio
+import time, smbus2, bme280, requests, sqlite3, threading, board, busio, adafruit_ccs811
+import os
+from picamera2 import Picamera2, encoders as enc, outputs as out
 from requests.exceptions import RequestException
-import adafruit_ccs811
 
-DB_NAME = 'securasense.db'
+
 TVOC_THRESHOLD = 150
 ECO2_THRESHOLD = 1000
-WORKING_INTERVAL = 10
-BME280_ADDRESS = 0x76
+
+recording_thread = None
+recording_event = threading.Event()
 outdoor_ip = None
+video_dir = "/tmp"
+
+conn = sqlite3.connect("securasense.db")
+cam = Picamera2()
+
+
+def init_db():
+    conn.execute('''CREATE TABLE IF NOT EXISTS sensor_data (timestamp TEXT, indoor_temp REAL, indoor_pressure REAL, 
+                    indoor_humidity REAL, indoor_eco2 REAL, indoor_tvoc REAL, outdoor_temp REAL, outdoor_pressure REAL, 
+                    outdoor_humidity REAL)''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS notifications (timestamp TEXT, message TEXT, image BLOB)''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY, secure_mode INTEGER DEFAULT 0)''')
+    conn.execute('INSERT OR IGNORE INTO settings (id, secure_mode) VALUES (1, 0)')
+    conn.commit()
 
 
 def init_sensors():
     bus = smbus2.SMBus(1)
-    params = bme280.load_calibration_params(bus, BME280_ADDRESS)
+    params = bme280.load_calibration_params(bus, 0x76)
     i2c = busio.I2C(board.SCL, board.SDA)
     ccs811 = adafruit_ccs811.CCS811(i2c)
     while not ccs811.data_ready:
         time.sleep(1)
     return bus, params, ccs811
-
-
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    with conn:
-        conn.execute('''CREATE TABLE IF NOT EXISTS sensor_data (timestamp TEXT, indoor_temp REAL, indoor_pressure REAL, 
-                        indoor_humidity REAL, indoor_eco2 REAL, indoor_tvoc REAL, outdoor_temp REAL, outdoor_pressure REAL, 
-                        outdoor_humidity REAL)''')
-        conn.execute('''CREATE TABLE IF NOT EXISTS notifications (timestamp TEXT, message TEXT)''')
-        conn.execute('''CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY, secure_mode INTEGER DEFAULT 0)''')
-        conn.execute('INSERT OR IGNORE INTO settings (id, secure_mode) VALUES (1, 0)')
-    return conn
 
 
 def find_outdoor_sensor():
@@ -48,34 +52,59 @@ def find_outdoor_sensor():
         time.sleep(10)
 
 
-def insert_sensor_data(cursor, indoor, outdoor=None):
-    cursor.execute('''INSERT INTO sensor_data (timestamp, indoor_temp, indoor_pressure, indoor_humidity, indoor_eco2, 
+def insert_sensor_data(indoor, outdoor=None):
+    conn.execute('''INSERT INTO sensor_data (timestamp, indoor_temp, indoor_pressure, indoor_humidity, indoor_eco2, 
                     indoor_tvoc, outdoor_temp, outdoor_pressure, outdoor_humidity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                    (time.strftime('%Y-%m-%d %H:%M:%S'), *indoor, *(outdoor or (None, None, None))))
+    conn.commit()
 
 
-def is_security_mode_active(cursor):
-    cursor.execute('SELECT secure_mode FROM settings WHERE id = 1')
-    return cursor.fetchone()[0] == 1
+def get_secure_mode_status():
+    return conn.execute('SELECT secure_mode FROM settings WHERE id = 1').fetchone()[0]
 
 
-def insert_notification(cursor, message):
+def insert_notification(message, image=None):
     print(message)
-    cursor.execute('INSERT INTO notifications (timestamp, message) VALUES (?, ?)',
-                   (time.strftime('%Y-%m-%d %H:%M:%S'), message))
+    conn.execute('INSERT INTO notifications (timestamp, message, image) VALUES (?, ?, ?)',
+                   (time.strftime('%Y-%m-%d %H:%M:%S'), message, image))
+    conn.commit()
+
+
+def record_in_segments():
+    while recording_event.is_set():
+        cam.configure(cam.create_preview_configuration())
+        cam.start()
+        cam.start_recording(enc.H264Encoder(10000000), output=out.FfmpegOutput(os.path.join(video_dir, "recording.mp4")))
+        time.sleep(10)
+        cam.stop_recording()
+        os.rename(os.path.join(video_dir, "recording.mp4"), os.path.join(video_dir, f"live_{time.strftime('%Y%m%d_%H%M%S')}.mp4"))
+        videos = sorted([f for f in os.listdir(video_dir) if f.startswith("live") and f.endswith(".mp4")])
+        while len(videos) > 2:
+            os.remove(os.path.join(video_dir, videos.pop(0)))
+
+
+def security():
+    global recording_thread
+    if get_secure_mode_status():
+        if recording_thread is None or not recording_thread.is_alive():
+            recording_event.set()
+            recording_thread = threading.Thread(target=record_in_segments, daemon=True)
+            recording_thread.start()
+    elif recording_thread is not None and recording_thread.is_alive():
+        recording_event.clear()
+        recording_thread.join()
 
 
 def main():
     global outdoor_ip
     bus, params, ccs811 = init_sensors()
-    conn = init_db()
-    cursor = conn.cursor()
+    init_db()
 
     threading.Thread(target=find_outdoor_sensor, daemon=True).start()
 
     try:
         while True:
-            indoor = bme280.sample(bus, BME280_ADDRESS, params)
+            indoor = bme280.sample(bus, 0x76, params)
             indoor_temp, indoor_pres, indoor_hum = indoor.temperature, indoor.pressure, indoor.humidity
             indoor_eco2, indoor_tvoc = ccs811.eco2, ccs811.tvoc
             print(f"Indoor: {indoor_temp:.2f} °C, {indoor_pres:.2f} hPa, {indoor_hum:.2f} %, eCO2: {indoor_eco2} ppm, TVOC: {indoor_tvoc} ppb")
@@ -90,18 +119,20 @@ def main():
                     outdoor_ip = None
                     threading.Thread(target=find_outdoor_sensor, daemon=True).start()
 
-            insert_sensor_data(cursor, (indoor_temp, indoor_pres, indoor_hum, indoor_eco2, indoor_tvoc), (outdoor_temp, outdoor_pres, outdoor_hum))
+            insert_sensor_data((indoor_temp, indoor_pres, indoor_hum, indoor_eco2, indoor_tvoc), (outdoor_temp, outdoor_pres, outdoor_hum))
 
-            if is_security_mode_active(cursor) and (indoor_tvoc > TVOC_THRESHOLD or indoor_eco2 > ECO2_THRESHOLD):
-                insert_notification(cursor, "Warning: Potential smoke/fire detected!")
+            if indoor_tvoc > TVOC_THRESHOLD or indoor_eco2 > ECO2_THRESHOLD:
+                insert_notification("Warning: Potential smoke/fire detected!")
 
-            conn.commit()
-            time.sleep(WORKING_INTERVAL)
+            security()
+
+            time.sleep(10)
 
     except (KeyboardInterrupt, Exception) as e:
         print(f"Program stopped: {e}")
     finally:
         conn.close()
+
 
 if __name__ == "__main__":
     main()
