@@ -2,7 +2,7 @@ import sqlite3, glob, os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackContext, CallbackQueryHandler
 
-TOKEN = "7204329201:AAF1hTTs2UJPAeJBOw2udrnMGUFNsWO0BjQ"
+TOKEN = "7204329201:AAHPuQr14s_x-4XINhh9QTEqmvFu5GHFoXk"
 video_dir = "/tmp"
 
 conn = sqlite3.connect('securasense.db')
@@ -20,7 +20,8 @@ def set_secure_mode_status(status):
 
 def build_keyboard():
     secure_mode = get_secure_mode_status()
-    buttons = [[InlineKeyboardButton("Deactivate secure mode" if secure_mode else "Activate secure mode", callback_data="toggle_secure_mode")]]
+    buttons = [[InlineKeyboardButton("Atmospheric conditions", callback_data="atmospheric_conditions")],
+               [InlineKeyboardButton("Deactivate secure mode" if secure_mode else "Activate secure mode", callback_data="toggle_secure_mode")]]
     if secure_mode:
         buttons.append([InlineKeyboardButton("Watch camera", callback_data="watch_camera")])
     return InlineKeyboardMarkup(buttons)
@@ -42,6 +43,28 @@ async def button(update: Update, context: CallbackContext):
         await query.edit_message_text("Loading live video, please wait...")
         await query.message.reply_video(video=open(max(glob.glob(os.path.join(video_dir, "live_*.mp4")), key=os.path.getmtime), 'rb'))
         await query.message.reply_text("Please, choose an option:", reply_markup=build_keyboard())
+    elif query.data == "atmospheric_conditions":
+        await send_atmospheric_conditions(query.message)
+
+
+async def send_atmospheric_conditions(message):
+    data = conn.execute('SELECT timestamp, indoor_temp, indoor_pressure, indoor_humidity, indoor_eco2, indoor_tvoc, outdoor_temp, outdoor_pressure, outdoor_humidity FROM sensor_data ORDER BY timestamp DESC LIMIT 1').fetchone()
+    if data:
+        response = (f"{data[0]}\n"
+                    f"Indoor Temp: {data[1]:.2f}°C\n"
+                    f"Indoor Pressure: {data[2]:.2f} hPa\n"
+                    f"Indoor Humidity: {data[3]:.2f}%\n"
+                    f"Indoor eCO2: {data[4]:.2f} ppm\n"
+                    f"Indoor TVOC: {int(data[5])} ppb\n"
+                    f"Outdoor Temp: {data[6]:.2f}°C\n"
+                    f"Outdoor Pressure: {data[7]:.2f} hPa\n"
+                    f"Outdoor Humidity: {data[8]:.2f}%")
+        await message.reply_text(response)
+    else:
+        await message.reply_text("No atmospheric data available.")
+
+    await message.reply_text("Please, choose an option:", reply_markup=build_keyboard())
+
 
 
 async def send_notifications(context: CallbackContext):
