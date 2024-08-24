@@ -2,7 +2,7 @@ import sqlite3, glob, os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackContext, CallbackQueryHandler
 
-TOKEN = "7204329201:AAFzn6CPmvSnJ9VtT_j5xI1sDu96dCwfPuE"
+TOKEN = "7204329201:AAFtLRHNMKnktmOhPFQNw-fUNc61Tb0XgVc"
 video_dir = "/tmp"
 
 conn = sqlite3.connect('securasense.db')

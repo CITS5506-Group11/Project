@@ -1,5 +1,4 @@
-import time, smbus2, bme280, requests, sqlite3, threading, board, busio, adafruit_ccs811
-import os
+import time, smbus2, bme280, requests, sqlite3, threading, board, busio, adafruit_ccs811, os, glob
 from picamera2 import Picamera2, encoders as enc, outputs as out
 from requests.exceptions import RequestException
 
@@ -7,8 +6,8 @@ from requests.exceptions import RequestException
 TVOC_THRESHOLD = 150
 ECO2_THRESHOLD = 1000
 
-recording_thread = None
-recording_event = threading.Event()
+live_video_thread = None
+live_video_event = threading.Event()
 outdoor_ip = None
 video_dir = "/tmp"
 
@@ -70,29 +69,38 @@ def insert_notification(message, image=None):
     conn.commit()
 
 
-def record_in_segments():
-    while recording_event.is_set():
+def detect_movement():
+    last_live_video = max(glob.glob(os.path.join(video_dir, "live_*.mp4")), key=os.path.getmtime)
+
+
+def delete_old_video():
+    videos = sorted([f for f in os.listdir(video_dir) if f.startswith("live") and f.endswith(".mp4")])
+    while len(videos) > 2:
+        os.remove(os.path.join(video_dir, videos.pop(0)))
+
+
+def record_and_manage_video():
+    while live_video_event.is_set():
         cam.configure(cam.create_preview_configuration())
         cam.start()
         cam.start_recording(enc.H264Encoder(10000000), output=out.FfmpegOutput(os.path.join(video_dir, "recording.mp4")))
         time.sleep(10)
         cam.stop_recording()
         os.rename(os.path.join(video_dir, "recording.mp4"), os.path.join(video_dir, f"live_{time.strftime('%Y%m%d_%H%M%S')}.mp4"))
-        videos = sorted([f for f in os.listdir(video_dir) if f.startswith("live") and f.endswith(".mp4")])
-        while len(videos) > 2:
-            os.remove(os.path.join(video_dir, videos.pop(0)))
+        detect_movement()
+        delete_old_video()
 
 
-def security():
-    global recording_thread
+def video_security():
+    global live_video_thread
     if get_secure_mode_status():
-        if recording_thread is None or not recording_thread.is_alive():
-            recording_event.set()
-            recording_thread = threading.Thread(target=record_in_segments, daemon=True)
-            recording_thread.start()
-    elif recording_thread is not None and recording_thread.is_alive():
-        recording_event.clear()
-        recording_thread.join()
+        if live_video_thread is None or not live_video_thread.is_alive():
+            live_video_event.set()
+            live_video_thread = threading.Thread(target=record_and_manage_video, daemon=True)
+            live_video_thread.start()
+    elif live_video_thread is not None and live_video_thread.is_alive():
+        live_video_event.clear()
+        live_video_thread.join()
 
 
 def main():
@@ -124,7 +132,7 @@ def main():
             if indoor_tvoc > TVOC_THRESHOLD or indoor_eco2 > ECO2_THRESHOLD:
                 insert_notification("Warning: Potential smoke/fire detected!")
 
-            security()
+            video_security()
 
             time.sleep(10)
 
