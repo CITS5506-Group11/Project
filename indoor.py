@@ -1,4 +1,4 @@
-import time, smbus2, bme280, requests, sqlite3, threading, board, busio, adafruit_ccs811, os, glob
+import time, smbus2, bme280, requests, sqlite3, threading, board, busio, adafruit_ccs811, os, glob, cv2
 from picamera2 import Picamera2, encoders as enc, outputs as out
 from requests.exceptions import RequestException
 
@@ -9,6 +9,7 @@ ECO2_THRESHOLD = 1000
 live_video_thread = None
 live_video_event = threading.Event()
 outdoor_ip = None
+detected_movement = None
 video_dir = "/tmp"
 
 conn = sqlite3.connect("securasense.db")
@@ -70,7 +71,29 @@ def insert_notification(message, image=None):
 
 
 def detect_movement():
-    last_live_video = max(glob.glob(os.path.join(video_dir, "live_*.mp4")), key=os.path.getmtime)
+    global detected_movement
+
+    cap = cv2.VideoCapture(max(glob.glob(os.path.join(video_dir, "live_*.mp4")), key=os.path.getmtime))
+    first_frame = None
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (21, 21), 0)
+        if first_frame is None:
+            first_frame = gray
+            continue
+
+        contours, _ = cv2.findContours(cv2.threshold(cv2.absdiff(first_frame, gray), 25, 255, cv2.THRESH_BINARY)[1], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if any(cv2.contourArea(c) >= 500 for c in contours):
+            _, buffer = cv2.imencode('.jpg', frame)
+            detected_movement = ("Movement detected!", buffer.tobytes())
+            break
+
+    cap.release()
 
 
 def delete_old_video():
@@ -104,7 +127,7 @@ def video_security():
 
 
 def main():
-    global outdoor_ip
+    global outdoor_ip, detected_movement
     bus, params, ccs811 = init_sensors()
     init_db()
 
@@ -131,6 +154,10 @@ def main():
 
             if indoor_tvoc > TVOC_THRESHOLD or indoor_eco2 > ECO2_THRESHOLD:
                 insert_notification("Warning: Potential smoke/fire detected!")
+
+            if detected_movement:
+                insert_notification(*detected_movement)
+                detected_movement = None
 
             video_security()
 
