@@ -2,7 +2,7 @@ import sqlite3, glob, os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackContext, CallbackQueryHandler
 
-TOKEN = ""
+TOKEN = "7204329201:AAF1hTTs2UJPAeJBOw2udrnMGUFNsWO0BjQ"
 video_dir = "/tmp"
 
 conn = sqlite3.connect('securasense.db')
@@ -58,6 +58,9 @@ async def send_notifications(context: CallbackContext):
         conn.execute('DELETE FROM notifications WHERE id = ?', (notification[0],))
 
     conn.commit()
+    if notifications:
+        for chat_id in chat_ids:
+            await context.bot.send_message(chat_id=chat_id, text="Please, choose an option:", reply_markup=build_keyboard())
 
 
 def main():
