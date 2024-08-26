@@ -1,4 +1,4 @@
-import time, smbus2, bme280, requests, sqlite3, threading, board, busio, adafruit_ccs811, os, glob, cv2
+import time, smbus2, bme280, requests, sqlite3, threading, board, busio, adafruit_ccs811, os, glob, cv2, re
 from picamera2 import Picamera2, encoders as enc, outputs as out
 from requests.exceptions import RequestException
 
@@ -68,6 +68,29 @@ def insert_notification(message, image=None):
     print(message)
     conn.execute('INSERT INTO notifications (timestamp, message, image) VALUES (?, ?, ?)',
                    (time.strftime('%Y-%m-%d %H:%M:%S'), message, image))
+    conn.commit()
+
+
+def check_user_notifications(indoor_temp, outdoor_temp):
+    for chat_id, threshold, text in conn.execute('SELECT chat_id, threshold, text FROM user_notifications').fetchall():
+        match = re.match(r'(indoor|outdoor)\s*([><])\s*(\d+(\.\d+)?)', threshold)
+        if not match:
+            continue
+
+        condition_type, operator, condition_value = match.groups()[0], match.groups()[1], float(match.groups()[2])
+
+        if (condition_type == 'indoor' and
+                ((operator == '>' and indoor_temp > condition_value) or
+                 (operator == '<' and indoor_temp < condition_value))):
+            insert_notification(f"Alert: {text}. Indoor temperature {indoor_temp:.2f} °C")
+            conn.execute('DELETE FROM user_notifications WHERE chat_id = ?', (chat_id,))
+
+        elif (condition_type == 'outdoor' and outdoor_temp is not None and
+              ((operator == '>' and outdoor_temp > condition_value) or
+               (operator == '<' and outdoor_temp < condition_value))):
+            insert_notification(f"Alert: {text}. Outdoor temperature {outdoor_temp:.2f} °C")
+            conn.execute('DELETE FROM user_notifications WHERE chat_id = ?', (chat_id,))
+
     conn.commit()
 
 
@@ -155,6 +178,8 @@ def main():
 
             if indoor_tvoc > TVOC_THRESHOLD or indoor_eco2 > ECO2_THRESHOLD:
                 insert_notification("Warning: Potential smoke/fire detected!")
+
+            check_user_notifications(indoor_temp, outdoor_temp)
 
             if detected_movement:
                 insert_notification(*detected_movement)
