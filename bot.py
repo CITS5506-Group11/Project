@@ -2,7 +2,7 @@ import sqlite3, glob, os, pandas as pd
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackContext, CallbackQueryHandler
 
-TOKEN = "7204329201:AAHkpQ2TWtyDGz0wVYg4"
+TOKEN = "7204329201:AAHkpQ2TWtyDGz0wVYg"
 video_dir = "/tmp"
 
 conn = sqlite3.connect('securasense.db')
@@ -35,7 +35,7 @@ async def start(update: Update, context: CallbackContext):
     await update.message.reply_text("Welcome! Please, choose an option:", reply_markup=build_keyboard())
 
 
-async def buttons(update: Update, context: CallbackContext):
+async def menu_buttons(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
     chat_ids.add(query.message.chat_id)
@@ -154,7 +154,7 @@ async def send_notifications(context: CallbackContext):
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(buttons))
+    app.add_handler(CallbackQueryHandler(menu_buttons))
     job_queue = app.job_queue
     job_queue.run_repeating(send_notifications, interval=5, first=5)
     app.run_polling()
