@@ -1,12 +1,13 @@
 import sqlite3, glob, os, pandas as pd
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackContext, CallbackQueryHandler
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackContext, CallbackQueryHandler, MessageHandler, filters
 
-TOKEN = "7204329201:AAHkpQ2TWtyDGz0wVYg"
+TOKEN = "7204329201:AAHkpQ2TWtyDGz0wVYg4qblr-"
 video_dir = "/tmp"
 
 conn = sqlite3.connect('securasense.db')
 chat_ids = set()
+USER_INPUT_STAGE = {}
 
 
 def get_secure_mode_status():
@@ -23,6 +24,7 @@ def build_keyboard():
     buttons = [
         [InlineKeyboardButton("Atmospheric conditions", callback_data="atmospheric_conditions")],
         [InlineKeyboardButton("Historic atmospheric conditions", callback_data="historic_conditions")],
+        [InlineKeyboardButton("Create a notification", callback_data="create_notification")],
         [InlineKeyboardButton("Deactivate secure mode" if secure_mode else "Activate secure mode", callback_data="toggle_secure_mode")]
     ]
     if secure_mode:
@@ -37,29 +39,55 @@ async def start(update: Update, context: CallbackContext):
 
 async def menu_buttons(update: Update, context: CallbackContext):
     query = update.callback_query
-    await query.answer()
-    chat_ids.add(query.message.chat_id)
+    chat_id = query.message.chat_id if query else update.message.chat_id
+
+    if query:
+        await query.answer()
+        chat_ids.add(chat_id)
+
     try:
-        if query.data == "toggle_secure_mode":
-            set_secure_mode_status(not get_secure_mode_status())
-            await query.edit_message_text(f"Secure mode {'activated' if get_secure_mode_status() else 'deactivated'}.", reply_markup=build_keyboard())
-        elif query.data == "watch_camera":
-            await query.edit_message_text("Loading live video, please wait...")
-            await query.message.reply_video(video=open(max(glob.glob(os.path.join(video_dir, "live_*.mp4")), key=os.path.getmtime), 'rb'))
-            await query.message.reply_text("Please, choose an option:", reply_markup=build_keyboard())
-        elif query.data == "atmospheric_conditions":
-            await send_atmospheric_conditions(query.message)
-            await query.message.reply_text("Please, choose an option:", reply_markup=build_keyboard())
-        elif query.data == "historic_conditions":
-            await show_historic_conditions_menu(query.message)
-        elif query.data == "historic_hour":
-            await send_historic_conditions(query, "hour")
-        elif query.data == "historic_day":
-            await send_historic_conditions(query, "day")
-        elif query.data == "historic_week":
-            await send_historic_conditions(query, "week")
-        elif query.data == "historic_month":
-            await send_historic_conditions(query, "month")
+        if query and query.data:
+            if query.data == "toggle_secure_mode":
+                set_secure_mode_status(not get_secure_mode_status())
+                await query.edit_message_text(f"Secure mode {'activated' if get_secure_mode_status() else 'deactivated'}.", reply_markup=build_keyboard())
+            elif query.data == "watch_camera":
+                await query.edit_message_text("Loading live video, please wait...")
+                await query.message.reply_video(video=open(max(glob.glob(os.path.join(video_dir, "live_*.mp4")), key=os.path.getmtime), 'rb'))
+                await query.message.reply_text("Please, choose an option:", reply_markup=build_keyboard())
+            elif query.data == "atmospheric_conditions":
+                await send_atmospheric_conditions(query.message)
+                await query.message.reply_text("Please, choose an option:", reply_markup=build_keyboard())
+            elif query.data == "historic_conditions":
+                await show_historic_conditions_menu(query.message)
+            elif query.data.startswith("historic_"):
+                await send_historic_conditions(query, query.data.split("_")[1])
+            elif query.data == "create_notification":
+                USER_INPUT_STAGE[chat_id] = "waiting_for_threshold"
+                await query.message.reply_text("Enter 'indoor' or 'outdoor' followed by the temperature threshold. For example, 'indoor 25>' or 'outdoor 18<'.")
+        else:
+            if chat_id in USER_INPUT_STAGE:
+                user_input = update.message.text
+
+                if USER_INPUT_STAGE[chat_id] == "waiting_for_threshold":
+                    if ('indoor ' in user_input or 'outdoor ' in user_input) and (user_input.endswith('>') or user_input.endswith('<')):
+                        USER_INPUT_STAGE[chat_id] = "waiting_for_text"
+                        context.user_data['threshold'] = user_input
+                        await update.message.reply_text("Threshold accepted. Now, enter the notification text.")
+                    else:
+                        await update.message.reply_text("Invalid format. Please enter 'indoor' or 'outdoor' followed by the temperature threshold, e.g., 'indoor 25>' or 'outdoor 18<'.")
+                elif USER_INPUT_STAGE[chat_id] == "waiting_for_text":
+                    threshold = context.user_data.get('threshold')
+                    notification_text = user_input
+
+                    conn.execute('INSERT INTO user_notifications (chat_id, threshold, text) VALUES (?, ?, ?)',(chat_id, threshold, notification_text))
+                    conn.commit()
+
+                    await update.message.reply_text("Notification created successfully.")
+                    del USER_INPUT_STAGE[chat_id]
+                    await update.message.reply_text("Please, choose an option:", reply_markup=build_keyboard())
+            else:
+                await query.message.reply_text("Please, choose an option:", reply_markup=build_keyboard())
+
     except Exception as e:
         print(e)
         await query.message.reply_text("An error occurred. Please try again.")
@@ -104,7 +132,6 @@ async def generate_historic_report(period: str):
     elif period == "month":
         f = "%Y-%m"
 
-    # Construct the SQL query
     query_sql = f'''
     SELECT strftime('{f}', timestamp) as period,
            avg(indoor_temp) as avg_indoor_temp,
@@ -155,6 +182,7 @@ def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_buttons))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_buttons))
     job_queue = app.job_queue
     job_queue.run_repeating(send_notifications, interval=5, first=5)
     app.run_polling()
