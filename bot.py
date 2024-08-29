@@ -162,13 +162,13 @@ async def send_historic_conditions(query: Update, period: str):
 async def send_notifications(context: CallbackContext):
     if not chat_ids:
         return
-    cursor = conn.execute('SELECT id, timestamp, message, image FROM notifications')
+    cursor = conn.execute('SELECT id, timestamp, message, link FROM notifications')
     notifications = cursor.fetchall()
     for notification in notifications:
         for chat_id in chat_ids:
             await context.bot.send_message(chat_id=chat_id, text=f"{notification[1]}\n{notification[2]}")
             if notification[3]:
-                await context.bot.send_photo(chat_id=chat_id, photo=notification[3])
+                await context.bot.send_video(chat_id=chat_id, video=open(notification[3], 'rb'))
 
         conn.execute('DELETE FROM notifications WHERE id = ?', (notification[0],))
 

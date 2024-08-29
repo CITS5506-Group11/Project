@@ -10,6 +10,8 @@ live_video_thread = None
 live_video_event = threading.Event()
 outdoor_ip = None
 detected_movement = None
+detected_movement_file_path = None
+movement_detection_lock = threading.Lock()
 video_dir = "/tmp"
 
 conn = sqlite3.connect("securasense.db")
@@ -20,7 +22,7 @@ def init_db():
     conn.execute('''CREATE TABLE IF NOT EXISTS sensor_data (timestamp TEXT, indoor_temp REAL, indoor_pressure REAL, 
                     indoor_humidity REAL, indoor_eco2 REAL, indoor_tvoc REAL, outdoor_temp REAL, outdoor_pressure REAL, 
                     outdoor_humidity REAL)''')
-    conn.execute('''CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, message TEXT, image BLOB)''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, message TEXT, link TEXT)''')
     conn.execute('''CREATE TABLE IF NOT EXISTS user_notifications (chat_id INTEGER, threshold TEXT, text TEXT)''')
     conn.execute('''CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY, secure_mode INTEGER DEFAULT 0)''')
     conn.execute('INSERT OR IGNORE INTO settings (id, secure_mode) VALUES (1, 0)')
@@ -64,10 +66,10 @@ def get_secure_mode_status():
     return conn.execute('SELECT secure_mode FROM settings WHERE id = 1').fetchone()[0]
 
 
-def insert_notification(message, image=None):
+def insert_notification(message, link=None):
     print(message)
-    conn.execute('INSERT INTO notifications (timestamp, message, image) VALUES (?, ?, ?)',
-                   (time.strftime('%Y-%m-%d %H:%M:%S'), message, image))
+    conn.execute('INSERT INTO notifications (timestamp, message, link) VALUES (?, ?, ?)',
+                   (time.strftime('%Y-%m-%d %H:%M:%S'), message, link))
     conn.commit()
 
 
@@ -95,38 +97,48 @@ def check_user_notifications(indoor_temp, outdoor_temp):
 
 
 def detect_movement():
-    global detected_movement
+    global detected_movement, detected_movement_file_path
 
-    cap = cv2.VideoCapture(max(glob.glob(os.path.join(video_dir, "live_*.mp4")), key=os.path.getmtime))
-    first_frame = None
+    with movement_detection_lock:
+        file_path = max(glob.glob(os.path.join(video_dir, "live_*.mp4")), key=os.path.getmtime)
 
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
+        if file_path == detected_movement_file_path:
+            return
 
-        gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (21, 21), 0)
-        if first_frame is None:
-            first_frame = gray
-            continue
+        cap = cv2.VideoCapture(file_path)
+        first_frame = None
 
-        contours, _ = cv2.findContours(cv2.threshold(cv2.absdiff(first_frame, gray), 25, 255, cv2.THRESH_BINARY)[1], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-        if any(cv2.contourArea(c) >= 500 for c in contours):
-            _, buffer = cv2.imencode('.jpg', frame)
-            detected_movement = ("Movement detected!", buffer.tobytes())
-            break
+            gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (21, 21), 0)
+            if first_frame is None:
+                first_frame = gray
+                continue
 
-    cap.release()
+            contours, _ = cv2.findContours(cv2.threshold(cv2.absdiff(first_frame, gray), 25, 255, cv2.THRESH_BINARY)[1], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            if any(cv2.contourArea(c) >= 1000 for c in contours):
+                detected_movement_file_path = file_path
+                new_file_path = file_path.replace("live_", "detected_movement_")
+                os.rename(file_path, new_file_path)
+                detected_movement = ("Movement detected!", new_file_path)
+                break
+
+        cap.release()
 
 
 def delete_old_video():
     videos = sorted([f for f in os.listdir(video_dir) if f.startswith("live") and f.endswith(".mp4")])
-    while len(videos) > 2:
+    while len(videos) > 3:
         os.remove(os.path.join(video_dir, videos.pop(0)))
 
 
 def record_and_manage_video():
+    detect_movement_thread = None
+
     while live_video_event.is_set():
         cam.configure(cam.create_preview_configuration())
         cam.start()
@@ -134,7 +146,11 @@ def record_and_manage_video():
         time.sleep(10)
         cam.stop_recording()
         os.rename(os.path.join(video_dir, "recording.mp4"), os.path.join(video_dir, f"live_{time.strftime('%Y%m%d_%H%M%S')}.mp4"))
-        detect_movement()
+
+        if detect_movement_thread is None or not detect_movement_thread.is_alive():
+            detect_movement_thread = threading.Thread(target=detect_movement, daemon=True)
+            detect_movement_thread.start()
+
         delete_old_video()
 
 
