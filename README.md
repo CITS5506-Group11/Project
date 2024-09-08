@@ -4,6 +4,10 @@
 
 | UWA ID  | Name | Github Username |
 |---------|------|-----------------|
+|10994619 |Jay Lee|10994619|
+|23884492 |Zihan Wu|Zihan22|
+|23824629 |Gawen Hei|CallMeHeiSir|
+|22496593 |Jordan Rigden|jordanrigden|
 |24090236 |Konstantin Tagintsev|ktagintsev|
 
 ## Project Overview
