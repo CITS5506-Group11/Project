@@ -184,6 +184,13 @@ def delete_old_video():
     while len(videos) > 3:
         os.remove(os.path.join(video_dir, videos.pop(0)))
 
+def delete_old_sensor_data():
+    """
+    Delete sensor data that is older than one year from the database.
+    """
+    one_year_ago = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(time.time() - 365 * 24 * 60 * 60))
+    conn.execute('DELETE FROM sensor_data WHERE timestamp < ?', (one_year_ago,))
+    conn.commit()
 
 def record_and_manage_video():
     """
@@ -273,6 +280,9 @@ def main():
 
             # Manage video security based on the secure mode status
             video_security()
+
+            # Delete old sensor data that is older than one year from the database
+            delete_old_sensor_data()
 
             # Wait for 10 seconds before the next iteration
             time.sleep(10)
