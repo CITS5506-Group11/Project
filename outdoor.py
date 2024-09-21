@@ -47,7 +47,11 @@ def server():
     while True:
         conn, _ = s.accept()
         request = conn.recv(1024)
-        response = "HTTP/1.1 200 OK\nContent-Type: application/json\n\n" + get_data() if b'/data' in request else "HTTP/1.1 404 NOT FOUND\n\n"
+        response = (
+            "HTTP/1.1 200 OK\nContent-Type: application/json\n\n" + get_data()
+            if b'/data' in request
+            else "HTTP/1.1 404 NOT FOUND\n\n"
+        )
         conn.send(response.encode('utf-8'))
         conn.close()
 
