@@ -27,7 +27,8 @@ def init_db():
     conn.execute('''CREATE TABLE IF NOT EXISTS sensor_data (timestamp TEXT, indoor_temp REAL, indoor_pressure REAL,
                     indoor_humidity REAL, indoor_eco2 REAL, indoor_tvoc REAL, outdoor_temp REAL, outdoor_pressure REAL,
                     outdoor_humidity REAL)''')
-    conn.execute('''CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, message TEXT, link TEXT)''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, 
+                    message TEXT, link TEXT)''')
     conn.execute('''CREATE TABLE IF NOT EXISTS user_notifications (chat_id INTEGER, threshold TEXT, text TEXT)''')
     conn.execute('''CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY, secure_mode INTEGER DEFAULT 0)''')
     conn.execute('INSERT OR IGNORE INTO settings (id, secure_mode) VALUES (1, 0)')
