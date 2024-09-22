@@ -13,6 +13,8 @@ conn = sqlite3.connect('securasense.db')
 chat_ids = set()
 # Dictionary to track user input stages
 USER_INPUT_STAGE = {}
+# Specify the allowed group ID
+ALLOWED_GROUP_ID = -4573751355
 
 
 def get_secure_mode_status():
@@ -63,6 +65,11 @@ async def start(update: Update, context: CallbackContext):
         update (Update): The update object.
         context (CallbackContext): The context object.
     """
+    # Restrict the bot to the allowed group
+    if update.message.chat_id != ALLOWED_GROUP_ID:
+        await update.message.reply_text("This bot is restricted to a specific group.")
+        return
+
     chat_ids.add(update.message.chat_id)
     await update.message.reply_text("Welcome! Please, choose an option:", reply_markup=build_keyboard())
 
@@ -71,6 +78,11 @@ async def menu_buttons(update: Update, context: CallbackContext):
     # Get the callback query and chat ID
     query = update.callback_query
     chat_id = query.message.chat_id if query else update.message.chat_id
+
+    # Restrict the bot to the allowed group
+    if chat_id != ALLOWED_GROUP_ID:
+        await update.message.reply_text("This bot is restricted to a specific group.")
+        return
 
     # If there is a query, answer it and add the chat ID to the set
     if query:
